@@ -1,7 +1,11 @@
 import copy
 import json
 import unittest
-from estimate_vehicle import estimate_vehicle, finalize, response_text, validate_input
+from estimate_vehicle import estimate_vehicle, finalize, response_text, validate_input, price_summary, format_report, main
+from unittest.mock import patch
+import io
+import tempfile
+from pathlib import Path
 
 
 DATA = {"vehicle": {"year": 2025, "make": "Toyota", "model": "4Runner",
@@ -31,6 +35,47 @@ def response(text):
 
 
 class EstimatorTests(unittest.TestCase):
+    def test_requested_price_format(self):
+        value = fixture()
+        self.assertEqual(price_summary(value)["on_road_price"], {"low": 51000, "high": 54000})
+        self.assertEqual(price_summary(value)["savings"], {"low": 17000, "high": 18000})
+        self.assertEqual(format_report(value),
+                         "On road price : $51,000–$54,000\n"
+                         "Market price : $68,000–$72,000\n"
+                         "Savings ($) : $17,000–$18,000\n"
+                         "Damage description: Mock bumper damage\n")
+
+    def test_unavailable_market_has_no_derived_prices(self):
+        value = fixture()
+        value["market_rate_range"]["range"] = None
+        summary = price_summary(value)
+        self.assertIsNone(summary["on_road_price"])
+        self.assertIsNone(summary["savings"])
+        self.assertEqual(format_report(value).count("Unavailable"), 3)
+
+    def test_cents_rounding_and_endpoint_subtraction(self):
+        value = fixture()
+        value["market_rate_range"]["range"] = {"low": 100.01, "high": 200.03}
+        summary = price_summary(value)
+        self.assertEqual(summary["on_road_price"], {"low": 75.01, "high": 150.02})
+        self.assertEqual(summary["savings"], {"low": 25, "high": 50.01})
+
+    def test_cli_text_default_and_json_opt_in(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.json"
+            path.write_text(json.dumps(DATA))
+            for flags in ([], ["--format", "json"]):
+                stdout = io.StringIO()
+                with patch("sys.argv", ["estimate_vehicle.py", str(path), *flags]), \
+                     patch("estimate_vehicle.estimate_vehicle", return_value=fixture()), \
+                     patch.dict("os.environ", {"OPENAI_API_KEY": "test-only"}), \
+                     patch("sys.stdout", stdout):
+                    self.assertEqual(main(), 0)
+                if flags:
+                    self.assertIn("expected_repair_cost", json.loads(stdout.getvalue()))
+                else:
+                    self.assertEqual(stdout.getvalue(), format_report(fixture()))
+
     def test_two_stage_request_and_totals(self):
         calls = []
         research = response("Mock sourced listings")

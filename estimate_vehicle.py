@@ -6,6 +6,7 @@ import ipaddress
 import json
 import math
 import os
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 import sys
 from datetime import datetime, timezone
@@ -164,6 +165,37 @@ def finalize(result, sources):
     return result
 
 
+def price_summary(result):
+    """Apply the user's pricing rule to corresponding low/high endpoints."""
+    market = result["market_rate_range"]["range"]
+    on_road = savings = None
+    if market is not None:
+        checked_range(market)
+        def money(value):
+            return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        on_road = {k: money(Decimal(str(v)) * Decimal("0.75"))
+                   for k, v in market.items()}
+        savings = {k: money(Decimal(str(v)) - Decimal(str(on_road[k])))
+                   for k, v in market.items()}
+    return {"on_road_price": on_road, "market_price": market,
+            "savings": savings,
+            "damage_description": result["damage_description"]["summary"]}
+
+
+def format_report(result):
+    summary = price_summary(result)
+    def price(value):
+        if value is None:
+            return "Unavailable — insufficient comparable data"
+        def amount(number):
+            return f"${number:,.2f}".removesuffix(".00")
+        return f"{amount(value['low'])}–{amount(value['high'])}"
+    return (f"On road price : {price(summary['on_road_price'])}\n"
+            f"Market price : {price(summary['market_price'])}\n"
+            f"Savings ($) : {price(summary['savings'])}\n"
+            f"Damage description: {summary['damage_description']}\n")
+
+
 def estimate_vehicle(data, api_key=None, model="gpt-4.1", transport=request_openai):
     """Importable function; api_key overrides OPENAI_API_KEY. Does not log secrets."""
     validate_input(data)
@@ -199,6 +231,7 @@ Build a photo-based repair budget with parts and labor low/high ranges per line 
                             "strict": True, "schema": SCHEMA}}
     }, api_key)
     result = finalize(json.loads(response_text(analysis)), sources)
+    result["price_summary"] = price_summary(result)
     return {"as_of": date, "currency": "USD", "vehicle": data["vehicle"], **result,
             "research_sources": sorted(sources),
             "limitations": "Photo-based estimate, not a teardown or diagnostic inspection. Comparable asking prices are not confirmed sale prices."}
@@ -208,6 +241,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="JSON with vehicle, photo_urls, and optional context")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--format", choices=("text", "json"), default="text",
+                        help="Default: four-line text report; json includes full repair details")
     parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL", "gpt-4.1"))
     args = parser.parse_args()
     try:
@@ -216,7 +251,8 @@ def main():
         if not key and sys.stdin.isatty():
             key = getpass.getpass("OpenAI API key (hidden): ")
         result = estimate_vehicle(data, api_key=key, model=args.model)
-        rendered = json.dumps(result, indent=2, allow_nan=False) + "\n"
+        rendered = (json.dumps(result, indent=2, allow_nan=False) + "\n"
+                    if args.format == "json" else format_report(result))
         if args.output:
             args.output.write_text(rendered)
             print(f"Saved {args.output}")
