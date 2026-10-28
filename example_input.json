@@ -1,0 +1,25 @@
+{
+  "vehicle": {
+    "year": 2025,
+    "make": "Toyota",
+    "model": "4Runner",
+    "trim": "TRD Pro Hybrid",
+    "mileage": 4956,
+    "vin": "JTEVB5BR4S5017765",
+    "stock_number": "41611326",
+    "engine": "2.4L 4-cylinder hybrid",
+    "drivetrain": "4WD",
+    "color": "Mudbath / Brown",
+    "title": "Clean Title (MO)",
+    "reported_damage": "Front End",
+    "condition": "Run & Drive"
+  },
+  "photo_urls": ["https://YOUR-PUBLIC-IMAGE-HOST.example/front.jpeg"],
+  "context": {
+    "location": "Irving, TX, USA",
+    "parts_preference": "OEM where available",
+    "body_labor_rate": 85,
+    "mechanical_labor_rate": 150,
+    "paint_labor_rate": 85
+  }
+}
